@@ -1,0 +1,34 @@
+trigger: none
+
+name: ArchHelloWorld_Pr_Build$(Date:yyyyMMdd)$(Rev:.r)
+
+pool:
+  name: ads_Mac
+  demands:
+    - ANDROID_HOME
+    - JAVA_VERSION -equals 17
+variables:
+  - group: configuration
+
+stages:
+  - stage: Build
+    displayName: Build apks
+    jobs:
+      - job: CleanAndBuild
+        displayName: Clean then Build Debug and Release version
+        steps:
+          - checkout: self
+          - task: Gradle@3
+            displayName: gradlew clean assemble
+            inputs:
+              workingDirectory: ""
+              gradleWrapperFile: "gradlew"
+              publishJUnitResults: false
+              tasks: "clean assemble -PobsReleaseArtifactoryAuthHeaderName=$(artifactory_headername) -PobsReleaseArtifactoryAuthHeaderValue=$(artifactory_token) -PobsSnapshotsArtifactoryAuthHeaderName=$(artifactory_headername) -PobsSnapshotsArtifactoryAuthHeaderValue=$(artifactory_token)"
+          - task: CopyFiles@2
+            displayName: Copy apk files
+            inputs:
+              contents: "**/*.apk"
+              targetFolder: "$(build.artifactStagingDirectory)"
+          - task: PublishBuildArtifacts@1
+            displayName: publish apk files

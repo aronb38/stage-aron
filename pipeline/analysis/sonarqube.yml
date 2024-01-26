@@ -1,0 +1,91 @@
+trigger: none
+
+name: ArchHelloWorld_StandAlone_Analysis$(Date:yyyyMMdd)$(Rev:.r)
+
+parameters:
+  - name: IfAgentSelect
+    displayName: Agent Selection
+    type: boolean
+    default: False
+  - name: AgentSelect
+    displayName: Agent Select
+    type: string
+    default: AGT-CLOUD-MAC-3
+    values:
+      - AGT-CLOUD-MAC-2
+      - AGT-CLOUD-MAC-3
+      - AGT-CLOUD-MAC-4
+      - AGT-CLOUD-MAC-5
+      - AGT-CLOUD-MAC-6
+      - AGT-CLOUD-MAC-7
+
+variables:
+  - group: configuration
+
+stages:
+  - stage: SonarQubeAnalysis
+    displayName: SonarQube analysis
+    pool:
+      name: ads_Mac
+      demands:
+        - ANDROID_HOME
+        - JAVA_VERSION -equals 17
+        - ${{ if eq(parameters.IfAgentSelect, true) }}:
+            - Agent.Name -equals ${{ parameters.AgentSelect }}
+    jobs:
+      - job: SonarAndJacoco
+        displayName: Jacoco report and publish on sonarqube
+        cancelTimeoutInMinutes: 1
+        steps:
+          - checkout: self
+          - task: SonarQubePrepare@5
+            displayName: Prepare analysis on SonarQube
+            inputs:
+              SonarQube: "practice-android-mds-connection"
+              scannerMode: "Other"
+              extraProperties: "sonar.branch.name=$(Build.SourceBranchName)"
+
+          - task: Gradle@2
+            displayName: gradlew jacocoTestReport
+            inputs:
+              tasks: "clean jacocoTestReport -PobsReleaseArtifactoryAuthHeaderName=$(artifactory_headername) -PobsReleaseArtifactoryAuthHeaderValue=$(artifactory_token) -PobsSnapshotsArtifactoryAuthHeaderName=$(artifactory_headername) -PobsSnapshotsArtifactoryAuthHeaderValue=$(artifactory_token) "
+              publishJUnitResults: true
+
+          - task: Gradle@2
+            displayName: gradlew sonarQube
+            inputs:
+              tasks: "sonar -Dsonar.login=$(sonarqube_token) -Dsonar.projectKey=$(sonarqube_projectKey) -Dsonar.host.url=$(sonarqube_host_url) -Dsonar.projectName=\"$(sonarqube_projectName)\" -PobsReleaseArtifactoryAuthHeaderName=$(artifactory_headername) -PobsReleaseArtifactoryAuthHeaderValue=$(artifactory_token) -PobsSnapshotsArtifactoryAuthHeaderName=$(artifactory_headername) -PobsSnapshotsArtifactoryAuthHeaderValue=$(artifactory_token)"
+
+          # Publish Quality Gate Result task
+          - task: SonarQubePublish@5
+            inputs:
+              pollingTimeoutSec: "300"
+
+
+  - stage: CodeAnalysisLint
+    displayName: Code Analysis Lint
+    pool:
+      name: ads_Mac
+      demands:
+        - ANDROID_HOME
+        - JAVA_VERSION -equals 17
+        - ${{ if eq(parameters.IfAgentSelect, true) }}:
+            - Agent.Name -equals ${{ parameters.AgentSelect }}
+    jobs:
+      - job: LintCodeAnalysis
+        displayName: Lint code analysis
+        steps:
+          - task: Gradle@2
+            displayName: gradlew clean lint
+            inputs:
+              workingDirectory: ""
+              gradleWrapperFile: "gradlew"
+              publishJUnitResults: false
+              tasks: "clean lint -PobsReleaseArtifactoryAuthHeaderName=$(artifactory_headername) -PobsReleaseArtifactoryAuthHeaderValue=$(artifactory_token) -PobsSnapshotsArtifactoryAuthHeaderName=$(artifactory_headername) -PobsSnapshotsArtifactoryAuthHeaderValue=$(artifactory_token)"
+          - task: CopyFiles@2
+            displayName: Copy lint reports files
+            inputs:
+              contents: "**/lint-results-debug.html"
+              targetFolder: "$(build.artifactStagingDirectory)"
+          - task: PublishBuildArtifacts@1
+            displayName: publish lint reports
